@@ -1,93 +1,75 @@
-import socket
-
 import dns
 from dns import resolver
 from scapy.all import *
 from scapy.layers.dhcp import DHCP, BOOTP
-from scapy.layers.dns import DNSQR, DNS
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
-
-
-# DHCP vars.
-dhcp_server_ip = "192.168.20.20"
-
-# DNS var.y
-dns_server_ip = "127.0.0.1"
-dns_port = 53
-domain_to_resolve = 'WhyTalIsGay.com'
-
-# DHCP Discover
-def send_dhcp_discover():
-    dhcp_discover = (
-        Ether(src=get_if_hwaddr(conf.iface), dst='ff:ff:ff:ff:ff:ff') /
-        IP(src='0.0.0.0', dst='255.255.255.255') /
-        UDP(sport=68, dport=67) /
-        BOOTP(op=1, chaddr=get_if_raw_hwaddr(conf.iface)[1]) /
-        DHCP(options=[("message-type", "discover"), "end"])
-    )
-    sendp(dhcp_discover, verbose=True)
-    print("DHCP Discover sent.")
-
-def send_dhcp_request(offered_ip):
-    dhcp_request = (
-        Ether(src=get_if_hwaddr(conf.iface), dst='ff:ff:ff:ff:ff:ff') /
-        IP(src='0.0.0.0', dst='255.255.255.255') /
-        UDP(sport=68, dport=67) /
-        BOOTP(op=1, chaddr=get_if_raw_hwaddr(conf.iface)[1]) /
-        DHCP(options=[
-            ("message-type", "request"),
-            ("requested_addr", offered_ip),
-            ("server_id", dhcp_server_ip),
-            "end"
-        ])
-    )
-    sendp(dhcp_request, verbose=True)
-    print("DHCP Request sent.")
+import socket
+import threading
 
 
 
-# Receive response - DHCP Offer
-def handle_dhcp_offer(packet):
+# DHCP Server.
+
+client_ip = "0.0.0.0"
+dns_server_ip = "127.0.0.3"
+domain = "example.com"
+
+#Sending DHCP discover to the server.
+def send_dhcp_dis():
+    dhcp_packet = (Ether(dst="ff:ff:ff:ff:ff") /
+                    IP(src='0.0.0.0', dst='255.255.255.255') /
+                    UDP(sport=68, dport=67) /
+                    BOOTP(op=1, chaddr=get_if_raw_hwaddr(conf.iface)[1]) /
+                    DHCP(options=[("message-type", "discover"), "end"]))
+    print("[+] DHCP Discover Sent.")
+    sendp(dhcp_packet, verbose=False)
+
+
+# DHCP offer handler function.
+def dhcp_offer(client_ip,packet):
     if DHCP in packet and packet[DHCP].options[0][1] == 2:
-        offered_ip = packet[BOOTP].yiaddr
-        print(f"IP address offered: {offered_ip}")
-        send_dhcp_request(offered_ip)  # Call the send_dhcp_request function here
-        return offered_ip
-    else:
-        return None
+        print("[+] Got A DHCP Offer.")
+        client_ip = packet[BOOTP].yiaddr
+        print("[+] DHCP Server Sent The IP:", client_ip)
+        dhcp_packet = (Ether(dst="ff:ff:ff:ff:ff:ff") /
+                       IP(src="0.0.0.0", dst="255.255.255.255") /
+                       UDP(sport=68, dport=67) /
+                       BOOTP(op=1, chaddr=get_if_raw_hwaddr(conf.iface)[1]) /
+                       DHCP(options=[("message-type", "request"),
+                                     ("requested_addr", packet[BOOTP].yiaddr),
+                                     ("server_id", packet[IP].src),
+                                     "end"]))
+        print("[+] DHCP Request Sent.")
+        sendp(dhcp_packet ,verbose=False)
+        return client_ip
 
 
-import subprocess
+# Applying the actual DHCP offer.
+def got_dhcp_ack(client_ip,packet):
 
-
-def handle_dhcp_ack(packet):
     if DHCP in packet and packet[DHCP].options[0][1] == 5:
-        acked_ip = packet[BOOTP].yiaddr
-        print(f"IP address acknowledged: {acked_ip}")
-
-        # Set IP address on the interface
+        print("[+] DHCP ack received.")
         interface_name = conf.iface
         subnet_mask = "255.255.255.0"
-        set_ip_command = f"sudo ifconfig {interface_name} {acked_ip} netmask {subnet_mask}"
+        set_ip_command = f"sudo ifconfig {interface_name} {client_ip} netmask {subnet_mask}"
         subprocess.run(set_ip_command, shell=True, check=True)
+        print("[ifconfig] Machine IP set to:",client_ip)
 
-        return acked_ip
-    else:
-        return None
-
-
-# DNS req sending
-# Envoyer une requête DNS
-def send_dns_query(dns_server_ip, domain):
+# DNS request sending.
+def send_dns_query(dns_server_ip, domain, client_ip=None):
     query = dns.message.make_query(domain, dns.rdatatype.A)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    if client_ip:
+        sock.bind((client_ip, 0))
+
     sock.sendto(query.to_wire(), (dns_server_ip, 53))
-    response_data, server_address = sock.recvfrom(1024)  # Fix here
+    response_data, server_address = sock.recvfrom(1024)
     response = dns.message.from_wire(response_data)
     return response
 
-# Extraire l'adresse IP du résultat DNS
+# Extracting the IP from DNS.
 def extract_dns_response_ip(response):
     if response:
         for rrset in response.answer:
@@ -97,31 +79,75 @@ def extract_dns_response_ip(response):
                     return resolved_ip
     return None
 
+def hostname_to_numeric(hostname):
+    return sum(ord(c) for c in hostname)
 
-def main():
-    # Receiving IP address using DHCP.
-    send_dhcp_discover()
-    dhcp_offer = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=60, prn=handle_dhcp_offer)
-    if not dhcp_offer:
-        print("Did not receive DHCP response.")
-        return
+def handle_lost_packet_signal(client, packet_id):
+    packet_data = sent_packets.get(packet_id)
+    if packet_data:
+        print(f"Resending packet {packet_id}: {packet_data}")
+        client.sendto(f"SIGNGET:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
 
-    dhcp_ack = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=60, prn=handle_dhcp_ack)
-    if not dhcp_ack:
-        print("Did not receive DHCP ACK.")
-        return
+def receive(server):
+    while True:
+        data, addr = server.recvfrom(1024)
+        data = data.decode()
 
-    # Sending DNS request and print the domain.
-    print(f"Sending DNS request for the domain: {domain_to_resolve}")
-    dns_response = send_dns_query(dns_server_ip, domain_to_resolve)
-    resolved_ip = extract_dns_response_ip(dns_response)
+        if data.startswith("SIGNLOST:"):
+            packet_id = int(data.split(":", 1)[1])
+            handle_lost_packet_signal(server, packet_id)
 
-    if resolved_ip:
-        print(f"The domain {domain_to_resolve} has been resolved to {resolved_ip}")
-    else:
-        print(f"The domain {domain_to_resolve} could not be resolved.")
-
-
-
+# Main func.
 if __name__ == "__main__":
-    main()
+
+    hostname = input("Enter your name : ")
+    # # DHCP Block
+    # send_dhcp_dis()
+    # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
+    # client_ip = dhcp_offer(client_ip, dhcp_packet)
+    # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
+    # got_dhcp_ack(client_ip, dhcp_packet)
+    #
+    # print("")
+    #
+    # # DNS Block
+    # print(f"[DNS] Sending DNS request for the domain: {domain}")
+    # dns_response = send_dns_query(dns_server_ip, domain, client_ip)
+    # resolved_ip = extract_dns_response_ip(dns_response)
+    # if resolved_ip:
+    #     print(f"[DNS] The domain {domain} has been resolved to {resolved_ip}")
+    # else:
+    #     print(f"[DNS] The domain {domain} could not be resolved.")
+    #
+    # print("")
+
+    # RUDP Block
+    resolved_ip = "127.0.0.15"
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    print(f"Gonna try to connect to {resolved_ip}")
+    name = hostname
+    print(" [RUDP] Sending a SIGNAL : SIGNEW to the RUDP Server")
+    client.sendto(f"SIGNEW:{name}".encode(), (resolved_ip, 49152))
+
+    sent_packets = {}
+    packet_id = hostname_to_numeric(hostname)
+    while True:
+        packet_id += 1
+        # input message to let the user what signal is going to be sent
+        print("This is the list of signals you can send :")
+        print("SIGNGET : to get a signal")
+        print("SIGNEW : to create a new connection")
+        print("SIGNEND : to end the connection")
+
+        message = input("SIGNAL :")
+        print(" [RUDP] Sending a SIGNAL : SIGNGET to the RUDP Server")
+        client.sendto(f"SIGNGET:{packet_id};{message}".encode(), (resolved_ip, 49152))
+        sent_packets[packet_id] = message
+
+        # Ajouter un thread pour écouter les messages entrants du serveur
+        receive_thread = threading.Thread(target=receive, args=(client,))
+        receive_thread.daemon = True
+        receive_thread.start()
+

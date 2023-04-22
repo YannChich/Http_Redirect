@@ -1,110 +1,21 @@
 from scapy.all import *
+import time
 from scapy.layers.dhcp import DHCP, BOOTP
-from scapy.layers.inet import IP, UDP
+from scapy.layers.inet import UDP, IP
 from scapy.layers.l2 import Ether
 
 
-conf.checkIPaddr = True
-
-# Personal vars.
-iface = "enp0s3"
-dhcp_server_ip = "192.168.20.20"
-subnet_mask = "255.255.255.0"
-router_ip = "192.168.1.254"
-dns_ip = "127.0.0.1"
-ip_range_start = "192.168.70.1"
-ip_range_end = "192.168.70.50"
-lease_time = 86400  # 24 heures en secondes
+dhcp_ip = "10.20.30.40"
+ip_range_start = "10.20.30.41"
+ip_range_end = "10.20.30.100"
 ip_allocs = 0
-# Array of Ip addr.
-ip_allocations = {}
-
-
-def handle_dhcp_packet(packet):
-    if DHCP in packet:
-        dhcp_options = packet[DHCP].options
-        dhcp_message_type = None
-
-        for option in dhcp_options:
-            if option[0] == "message-type":
-                dhcp_message_type = option[1]
-                break
-
-        if dhcp_message_type == 1:  # DHCP Discover
-            print("DHCP Discovering...")
-            send_dhcp_offer(packet)
-        elif dhcp_message_type == 3:  # DHCP Request
-            print("Received DHCP Request")  # Add this line
-            send_dhcp_ack(packet)
+subnet_mask = "255.255.255.0"
+router_ip = "10.20.30.101"
 
 
 
-def send_dhcp_offer(discover_packet):
-    global ip_allocations
 
-    offered_ip = generate_ip()
-
-    if offered_ip is None:
-        return
-
-    mac_address = discover_packet[Ether].src
-    transaction_id = discover_packet[BOOTP].xid
-    ip_allocations[mac_address] = offered_ip
-
-    dhcp_offer = (
-            Ether(src=get_if_hwaddr(iface), dst=mac_address) /
-            IP(src=dhcp_server_ip, dst="255.255.255.255") /
-            UDP(sport=67, dport=68) /
-            BOOTP(op=2, htype=1, hlen=6, xid=transaction_id, yiaddr=offered_ip, siaddr=dhcp_server_ip,
-                  chaddr=mac_address) /
-            DHCP(options=[
-                ("message-type", "offer"),
-                ("server_id", dhcp_server_ip),
-                ("lease_time", lease_time),
-                ("subnet_mask", subnet_mask),
-                ("router", router_ip),
-                ("name_server", dns_ip),
-                "end"
-            ])
-    )
-
-    sendp(dhcp_offer, iface=iface, verbose=False)
-    print(f"DHCP Offer sent. The IP -> {offered_ip}")
-
-
-def send_dhcp_ack(request_packet):
-    global ip_allocations
-
-    mac_address = request_packet[Ether].src
-    transaction_id = request_packet[BOOTP].xid
-    requested_ip = ip_allocations.get(mac_address, None)
-
-    if requested_ip is None:
-        return
-
-    dhcp_ack = (
-            Ether(src=get_if_hwaddr(iface), dst=mac_address) /
-            IP(src=dhcp_server_ip, dst="255.255.255.255") /
-            UDP(sport=67, dport=68) /
-            BOOTP(op=2, htype=1, hlen=6, xid=transaction_id, yiaddr=requested_ip, siaddr=dhcp_server_ip,
-                  chaddr=mac_address) /
-            DHCP(options=[
-                ("message-type", "ack"),
-                ("server_id", dhcp_server_ip),
-                ("lease_time", lease_time),
-                ("subnet_mask", subnet_mask),
-                ("router", router_ip),
-                ("name_server", dns_ip),
-                "end"
-            ])
-    )
-
-    print(f"Sending DHCP ACK to -> {requested_ip}")  # Add this line
-    sendp(dhcp_ack, iface=iface, verbose=False)
-    print(f"DHCP ACK sent to -> {requested_ip}")
-
-
-
+# Genarate an IP address.
 def generate_ip():
     num = ip_range_end.split(".")
     global ip_allocs
@@ -121,10 +32,58 @@ def generate_ip():
     return None
 
 
-def main():
-    print("DHCP server Runing...")
-    sniff(filter="udp and (port 67 or port 68)", prn=handle_dhcp_packet, iface=iface, store=0)
+# Define a function to handle DHCP requests
+def discover_to_offer(packet,offer_client_ip):
+
+    if DHCP in packet and packet[DHCP].options[0][1] == 1:
+        print("[+] Got DHCP Discover.")
+
+        dhcp_offer = (Ether(src=get_if_hwaddr("enp0s3"), dst=packet[Ether].src) /
+                      IP(src=dhcp_ip, dst="255.255.255.255") /
+                      UDP(sport=67, dport=68) /
+                      BOOTP(op=2, yiaddr=offer_client_ip, siaddr="10.20.30.40", chaddr=packet[Ether].src)/
+                      DHCP(options=[("message-type", "offer"),
+                                  ("server_id", dhcp_ip),
+                                  ("subnet_mask", "255.255.255.0"),
+                                  ("router", "10.20.30.40"),
+                                  ("name_server", "10.20.30.40"),
+                                  ("lease_time", 86400),
+                                    "end"]))
+
+        print("[+] Responding to client.")
+        time.sleep(1)
+        sendp(dhcp_offer,verbose=False)
+        return offer_client_ip
 
 
+def request_to_ack(packet,offer_client_ip):
+
+    if DHCP in packet and packet[DHCP].options[0][1] == 3:
+        print("[+] Got DHCP Request.")
+
+        dhcp_ack = (Ether(src=get_if_hwaddr("enp0s3"), dst=packet[Ether].src) /
+                    IP(src=dhcp_ip, dst="255.255.255.255") /
+                    UDP(sport=67, dport=68) /
+                    BOOTP(op=2, yiaddr=packet[BOOTP].yiaddr, siaddr="10.20.30.40", chaddr=packet[Ether].src) /
+                    DHCP(options=[("message-type", "ack"),
+                                  ("server_id", dhcp_ip),
+                                  ("subnet_mask", "255.255.255.0"),
+                                  ("router", "10.20.30.40"),
+                                  ("name_server", "10.20.30.40"),
+                                  ("lease_time", 86400),
+                                  "end"]))
+                                  
+        print("[+] ACK Sent To The Client.")
+        # Send DHCP Ack to the client
+        time.sleep(1)
+        sendp(dhcp_ack,verbose=False)
+
+
+# main
 if __name__ == "__main__":
-    main()
+        while True:
+            print("[+] DHCP Server Running.")
+            dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, iface="enp0s3")[0]
+            offer_client_ip = discover_to_offer(dhcp_packet,generate_ip())
+            packet = sniff(filter="udp and port 67", count=1, iface="enp0s3")[0]
+            request_to_ack(packet,offer_client_ip)
