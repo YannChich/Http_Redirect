@@ -1,8 +1,9 @@
 import socket
+import time
 
 SizeOfPacket = 1024
 clients = []
-Server_IP = "127.0.0.15"
+Server_IP = "127.0.0.31"
 last_received_id = {}
 
 def hostname_to_numeric(hostname):
@@ -12,7 +13,13 @@ def send_ack(server, addr, name):
     server.sendto(f"{name} joined ! ACK".encode(), addr)
 
 def send_lost_packet_signal(server, addr, expected_id):
+    print(f"Sending SIGNLOST:{expected_id} to {addr}")  
     server.sendto(f"SIGNLOST:{expected_id}".encode(), addr)
+
+
+def remove_client(addr):
+    global clients
+    clients = [client for client in clients if client[1] != addr]
 
 def receive(server):
     global last_received_id
@@ -39,6 +46,20 @@ def receive(server):
                 else:
                     print(f"Received out of order packet {packet_id} from {addr}: {payload}")
                     send_lost_packet_signal(server, addr, last_received_id[addr] + 1)
+
+            elif data.startswith("SIGNECHO:"):
+                packet_id, timestamp = data.split(":", 1)[1].split(";", 1)
+                packet_id = int(packet_id)
+                print(f"Received SIGNECHO from {addr}. Sending back the timestamp.")
+                server.sendto(f"ECHOREPLY:{packet_id};{timestamp}".encode(), addr)        
+
+            elif data.startswith("SIGNEND:"):
+                packet_id, payload = data.split(":", 1)[1].split(";", 1)
+                packet_id = int(packet_id)
+                last_received_id[addr] = packet_id
+                print(f"Received SIGNEND from {addr}. Closing connection.")
+                server.sendto(f"ACKEND:{packet_id}".encode(), addr)
+                remove_client(addr)
 
         except:
             pass

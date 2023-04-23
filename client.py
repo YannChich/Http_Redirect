@@ -1,4 +1,5 @@
 import dns
+import sys
 from dns import resolver
 from scapy.all import *
 from scapy.layers.dhcp import DHCP, BOOTP
@@ -6,6 +7,7 @@ from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether
 import socket
 import threading
+import time
 
 
 
@@ -79,29 +81,109 @@ def extract_dns_response_ip(response):
                     return resolved_ip
     return None
 
+# RUDP FUNCTIONCS 
+
 def hostname_to_numeric(hostname):
     return sum(ord(c) for c in hostname)
 
-def handle_lost_packet_signal(client, packet_id):
+def handle_lost_packet_signal(client, packet_id,sent_packets):
     packet_data = sent_packets.get(packet_id)
     if packet_data:
         print(f"Resending packet {packet_id}: {packet_data}")
         client.sendto(f"SIGNGET:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
 
-def receive(server):
+def receive(server,connection_open,sent_packets):
     while True:
         data, addr = server.recvfrom(1024)
         data = data.decode()
+        print(f"Received data: {data}")
 
         if data.startswith("SIGNLOST:"):
+            print("Receive SIGNLOST , going to send the lost packet")
             packet_id = int(data.split(":", 1)[1])
-            handle_lost_packet_signal(server, packet_id)
+            handle_lost_packet_signal(server, packet_id, sent_packets)
+        elif data.startswith("ACKEND:"):
+            print("Received ACKEND from server. Closing connection.")
+            connection_open = False
+            server.close()
+            sys.exit(0)
+        elif data.startswith("ECHOREPLY:"):
+            packet_id, timestamp = data.split(":", 1)[1].split(";", 1)
+            packet_id = int(packet_id)
+            latency = (time.time() - float(timestamp)) * 1000
+            print(f"Received ECHOREPLY from server. Latency: {latency:.2f} ms")
+
+
+
+def RUDP_Client(hostname):
+    connection_open = True
+    resolved_ip = "127.0.0.31"
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    print(f"Gonna try to connect to {resolved_ip}")
+    print(" [RUDP] Sending a SIGNAL : SIGNEW to the RUDP Server")
+    client.sendto(f"SIGNEW:{hostname}".encode(), (resolved_ip, 49152))
+
+    sent_packets = {}
+    packet_id = hostname_to_numeric(hostname)
+    # Ajouter un thread pour écouter les messages entrants du serveur
+    receive_thread = threading.Thread(target=receive, args=(client,connection_open,sent_packets))
+    receive_thread.daemon = True
+    receive_thread.start()
+
+    while True:
+        if connection_open == False:
+            create_new_connection = input("Connection closed. Do you want to send SIGNEW to create a new connection? (yes/no): ")
+            if create_new_connection.lower() == "yes":
+                connection_open = True
+                client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                print(" [RUDP] Sending a SIGNAL : SIGNEW to the RUDP Server")
+                client.sendto(f"SIGNEW:{hostname}".encode(), (resolved_ip, 49152))
+            else:
+                print("END OF CONNECTION")
+        
+        else:
+            # input message to let the user what signal is going to be sent
+            print("-------------------------------------------------------")
+            print("This is the list of signals you can send :")
+            print("SIGNGET : to get the ridirection to the server HTTP")
+            print("SIGNEND : to end the connection")
+            print("SIGNECHO : to know the ping with the server RUDP")
+            print("-------------------------------------------------------")
+
+            message = input("SIGNAL :")
+
+            packet_id+=1
+
+            if message == "SIGNGET":
+                print(" [RUDP] Sending a SIGNAL : SIGNGET to the RUDP Server")
+                client.sendto(f"SIGNGET:{packet_id};{message}".encode(), (resolved_ip, 49152))
+                sent_packets[packet_id] = message
+
+            elif message == "SIGNEND":
+                print(" [RUDP] Sending a SIGNAL : SIGNEND to the RUDP Server")
+                client.sendto(f"SIGNEND:{packet_id};{message}".encode(), (resolved_ip, 49152))
+                sent_packets[packet_id] = message
+            
+            elif message == "SIGNECHO":
+                timestamp = time.time()
+                print(" [RUDP] Sending a SIGNAL : SIGNECHO to the RUDP Server")
+                client.sendto(f"SIGNECHO:{packet_id};{timestamp}".encode(), (resolved_ip, 49152))
+                sent_packets[packet_id] = message
+
+
+            else:
+                print("Invalid signal, please try again.")
+
+        
 
 # Main func.
 if __name__ == "__main__":
 
     hostname = input("Enter your name : ")
-    # # DHCP Block
+    # DHCP Block
     # send_dhcp_dis()
     # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
     # client_ip = dhcp_offer(client_ip, dhcp_packet)
@@ -120,34 +202,10 @@ if __name__ == "__main__":
     #     print(f"[DNS] The domain {domain} could not be resolved.")
     #
     # print("")
-
     # RUDP Block
-    resolved_ip = "127.0.0.15"
-    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    RUDP_Client(hostname)
+    
 
-    print(f"Gonna try to connect to {resolved_ip}")
-    name = hostname
-    print(" [RUDP] Sending a SIGNAL : SIGNEW to the RUDP Server")
-    client.sendto(f"SIGNEW:{name}".encode(), (resolved_ip, 49152))
 
-    sent_packets = {}
-    packet_id = hostname_to_numeric(hostname)
-    while True:
-        packet_id += 1
-        # input message to let the user what signal is going to be sent
-        print("This is the list of signals you can send :")
-        print("SIGNGET : to get a signal")
-        print("SIGNEW : to create a new connection")
-        print("SIGNEND : to end the connection")
 
-        message = input("SIGNAL :")
-        print(" [RUDP] Sending a SIGNAL : SIGNGET to the RUDP Server")
-        client.sendto(f"SIGNGET:{packet_id};{message}".encode(), (resolved_ip, 49152))
-        sent_packets[packet_id] = message
-
-        # Ajouter un thread pour écouter les messages entrants du serveur
-        receive_thread = threading.Thread(target=receive, args=(client,))
-        receive_thread.daemon = True
-        receive_thread.start()
 
