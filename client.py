@@ -8,15 +8,53 @@ from scapy.layers.l2 import Ether
 import socket
 import threading
 import time
+import subprocess
+import sys
+import time
+import requests
+from bs4 import BeautifulSoup
 
 # DHCP Server.
 
 client_ip = "0.0.0.0"
 dns_server_ip = "127.0.0.3"
 domain = "example.com"
-resolved_ip = "127.0.0.40"
+resolved_ip = "0.0.0.0"
 connection_open = True
 pause_client = False
+
+# Downloading files.
+def downloader():
+    url = "http://127.0.0.1/"
+    response = requests.get(url)
+    html_content = response.content
+    soup = BeautifulSoup(html_content, "html.parser")
+    print("Looking for files available to download")
+    for i in range(2):
+        sys.stdout.write('.')
+        sys.stdout.flush()
+        time.sleep(1)
+    sys.stdout.write('\b \b' * 3)
+    sys.stdout.flush()
+
+    # Find all the elements with the "p" tag and print their text
+    list = []
+    i = 1
+    print("Which file would you like to download from: http://localhost/")
+    for p in soup.find_all("a"):
+        print(f"{i}: {p.text}")
+        list.append(p.text)
+        i += 1
+    while True:
+        num = int(input("The number of the file you would like to download: "))
+        if num <= len(list):
+            filename = f"{list[num - 1]}"
+            set_ip_command = f"wget http://localhost/{filename}"
+            subprocess.run(set_ip_command, shell=True, check=True)
+            set_ip_command = f"chmod 777 {filename}"
+            subprocess.run(set_ip_command, shell=True, check=True)
+        else:
+            print("Wrong file number.")
 
 
 # Sending DHCP discover to the server.
@@ -120,6 +158,7 @@ def receive(server, sent_packets):
             print("Received ACKEND from server. Closing connection.")
             connection_open = False
             server.close()
+            sys.exit(0)
 
         elif data.startswith("ECHOREPLY:"):
             packet_id, timestamp = data.split(":", 1)[1].split(";", 1)
@@ -197,6 +236,7 @@ def RUDP_Client(hostname):
                 print(" [RUDP] Sending a SIGNAL : SIGNGET to the RUDP Server")
                 client.sendto(f"SIGNGET:{packet_id};{message}".encode(), (resolved_ip, 49152))
                 sent_packets[packet_id] = message
+                downloader()
 
             elif message == "SIGNEND":
                 print(" [RUDP] Sending a SIGNAL : SIGNEND to the RUDP Server")
@@ -225,23 +265,23 @@ def RUDP_Client(hostname):
 if __name__ == "__main__":
     hostname = input("Enter your name : ")
     # DHCP Block
-    # send_dhcp_dis()
-    # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
-    # client_ip = dhcp_offer(client_ip, dhcp_packet)
-    # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
-    # got_dhcp_ack(client_ip, dhcp_packet)
-    #
-    # print("")
-    #
-    # # DNS Block
-    # print(f"[DNS] Sending DNS request for the domain: {domain}")
-    # dns_response = send_dns_query(dns_server_ip, domain, client_ip)
-    # resolved_ip = extract_dns_response_ip(dns_response)
-    # if resolved_ip:
-    #     print(f"[DNS] The domain {domain} has been resolved to {resolved_ip}")
-    # else:
-    #     print(f"[DNS] The domain {domain} could not be resolved.")
-    #
-    # print("")
+    send_dhcp_dis()
+    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="ens33")[0]
+    client_ip = dhcp_offer(client_ip, dhcp_packet)
+    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="ens33")[0]
+    got_dhcp_ack(client_ip, dhcp_packet)
+
+    print("")
+
+    # DNS Block
+    print(f"[DNS] Sending DNS request for the domain: {domain}")
+    dns_response = send_dns_query(dns_server_ip, domain, client_ip)
+    resolved_ip = extract_dns_response_ip(dns_response)
+    if resolved_ip:
+        print(f"[DNS] The domain {domain} has been resolved to {resolved_ip}")
+    else:
+        print(f"[DNS] The domain {domain} could not be resolved.")
+
+    print("")
     # RUDP Block
     RUDP_Client(hostname)
