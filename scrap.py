@@ -3,16 +3,48 @@ import sys
 import time
 import requests
 from bs4 import BeautifulSoup
+import socket
 
-# Replace the URL below with the URL of the HTML page you want to scrape
+Server_IP = "127.0.0.72"
+Scrap_IP = "127.0.0.51"
+
+def send_file_list(file_list):
+    # Create TCP socket
+    tcp_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp_server.bind((Scrap_IP, 49153))  # Utilisez Scrap_IP ici
+    tcp_server.listen(1)
+    print("Waiting for RUDP server to connect...")
+
+    # Accept incoming connection
+    conn, addr = tcp_server.accept()
+
+    # Going to receive the message from rudp
+    signal = conn.recv(1024).decode()
+
+    if signal == "SIGNGET":
+        # Send the file list to the RUDP server
+        conn.sendall(file_list.encode())
+
+        # Close the socket
+        tcp_server.close()
+
+
+# Find all the elements with the "p" tag and print their text
+def list_maker():
+    file_list = ""
+    i = 1
+    print("Which file would you like to download from: http://127.0.0.1/")
+    for p in soup.find_all("a"):
+        file_list += p.text + ";"
+        i += 1
+    print("[SCRAP] Sending file list to RUDP server.")
+    send_file_list(file_list)
+
 url = "http://127.0.0.1/"
-
-# Send a request to the URL and get the HTML content
 response = requests.get(url)
 html_content = response.content
-
-# Use BeautifulSoup to parse the HTML content
 soup = BeautifulSoup(html_content, "html.parser")
+
 print("Looking for files available to download")
 for i in range(2):
     sys.stdout.write('.')
@@ -20,20 +52,4 @@ for i in range(2):
     time.sleep(1)
 sys.stdout.write('\b \b' * 3)
 sys.stdout.flush()
-
-# Find all the elements with the "p" tag and print their text
-list = []
-i = 1
-print("Which file would you like to download from: http://127.0.0.1/")
-for p in soup.find_all("a"):
-    print(f"{i}: {p.text}")
-    list.append(p.text)
-    i += 1
-while True:
-    num = int(input("The number of the file you would like to download: "))
-    if num <= len(list):
-        filename = f"{list[num - 1]}"
-        set_ip_command = f"wget http://127.0.0.1/{filename}"
-        subprocess.run(set_ip_command, shell=True, check=True)
-    else:
-        print("Wrong file number.")
+list_maker()

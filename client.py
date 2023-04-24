@@ -13,45 +13,37 @@ import sys
 import time
 import requests
 from bs4 import BeautifulSoup
+from queue import Queue
 
 # DHCP Server.
 
 client_ip = "0.0.0.0"
-dns_server_ip = "127.0.0.3"
+dns_server_ip = "127.0.0.7"
 domain = "example.com"
-resolved_ip = "0.0.0.0"
+resolved_ip = "127.0.0.72"
 connection_open = True
 pause_client = False
+list_queue = Queue()
+List = {}
 
 # Downloading files.
-def downloader():
-    url = "http://127.0.0.1/"
-    response = requests.get(url)
-    html_content = response.content
-    soup = BeautifulSoup(html_content, "html.parser")
-    print("Looking for files available to download")
-    for i in range(2):
-        sys.stdout.write('.')
-        sys.stdout.flush()
-        time.sleep(1)
-    sys.stdout.write('\b \b' * 3)
-    sys.stdout.flush()
-
-    # Find all the elements with the "p" tag and print their text
-    list = []
-    i = 1
-    print("Which file would you like to download from: http://localhost/")
-    for p in soup.find_all("a"):
-        print(f"{i}: {p.text}")
-        list.append(p.text)
-        i += 1
+def download_file(list):
+    i=1
+    for i in range(0,len(list)):
+        print(f"-{i} : {list[i]}")
+        
     while True:
-        num = int(input("The number of the file you would like to download: "))
+        num = int(input("The number of the file you would like to download: Press 0 if u want to exit "))
+        if num == 0:
+            print("We are goind to comeback on the connection with the RUDP Server")
+            print(".................................................")
+            connection_open = True
+            break
         if num <= len(list):
             filename = f"{list[num - 1]}"
-            set_ip_command = f"wget http://localhost/{filename}"
+            set_ip_command = f"wget --bind-address={client_ip} http://localhost/{filename}"
             subprocess.run(set_ip_command, shell=True, check=True)
-            set_ip_command = f"chmod 777 {filename}"
+            set_ip_command = f"sudo chmod 777 {filename}"
             subprocess.run(set_ip_command, shell=True, check=True)
         else:
             print("Wrong file number.")
@@ -137,6 +129,15 @@ def handle_lost_packet_signal(client, packet_id, sent_packets):
         print("-----------------------------------------------")
         client.sendto(f"SIGNGET:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
 
+def handle_ackget(data):
+    global connection_open
+    packet_id, file_list = data.split(":", 1)[1].split(";", 1)
+    my_list = file_list.split(";")[:-1]  # Remove the last empty element
+    list_queue.put(my_list)
+    connection_open = False
+
+    
+
 
 def receive(server, sent_packets):
     global connection_open
@@ -149,10 +150,16 @@ def receive(server, sent_packets):
         if data.startswith("SIGNACK"):
             print("Receive ACK from the RUDP Server. Connection established.")
 
-        if data.startswith("SIGNLOST:"):
+        elif data.startswith("SIGNLOST:"):
             print("Receive SIGNLOST , going to send the lost packet")
             packet_id = int(data.split(":", 1)[1])
             handle_lost_packet_signal(server, packet_id, sent_packets)
+
+        elif data.startswith("ACKGET:"):
+            print("Received ACKGET from server")
+            handle_ackget(data)
+            connection_open = False
+            
 
         elif data.startswith("ACKEND:"):
             print("Received ACKEND from server. Closing connection.")
@@ -183,6 +190,7 @@ def receive(server, sent_packets):
 def RUDP_Client(hostname):
     global connection_open
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.bind((client_ip,49152))
     client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     print(f"Gonna try to connect to {resolved_ip}")
@@ -193,11 +201,15 @@ def RUDP_Client(hostname):
     packet_id = hostname_to_numeric(hostname)
     # Ajouter un thread pour écouter les messages entrants du serveur
     receive_thread = threading.Thread(target=receive, args=(client, sent_packets))
-    receive_thread.daemon = True
     receive_thread.start()
 
     while True:
-        if pause_client:
+        time.sleep(2)
+        if not list_queue.empty():
+            file_list = list_queue.get()
+            download_file(file_list)
+            break
+        elif pause_client:
             for i in range(5):
                 sys.stdout.write('.')
                 sys.stdout.flush()
@@ -236,7 +248,6 @@ def RUDP_Client(hostname):
                 print(" [RUDP] Sending a SIGNAL : SIGNGET to the RUDP Server")
                 client.sendto(f"SIGNGET:{packet_id};{message}".encode(), (resolved_ip, 49152))
                 sent_packets[packet_id] = message
-                downloader()
 
             elif message == "SIGNEND":
                 print(" [RUDP] Sending a SIGNAL : SIGNEND to the RUDP Server")
@@ -266,9 +277,9 @@ if __name__ == "__main__":
     hostname = input("Enter your name : ")
     # DHCP Block
     send_dhcp_dis()
-    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="ens33")[0]
+    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
     client_ip = dhcp_offer(client_ip, dhcp_packet)
-    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="ens33")[0]
+    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
     got_dhcp_ack(client_ip, dhcp_packet)
 
     print("")
@@ -283,5 +294,6 @@ if __name__ == "__main__":
         print(f"[DNS] The domain {domain} could not be resolved.")
 
     print("")
+    
     # RUDP Block
     RUDP_Client(hostname)

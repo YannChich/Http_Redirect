@@ -3,10 +3,32 @@ import time
 
 SizeOfPacket = 1024
 clients = []
-Server_IP = "127.0.0.41"
+Server_IP = "127.0.0.72"
+Scrap_IP = "127.0.0.51"
 last_received_id = {}
 unacked_packets = {}
 client_info = {}
+
+#Get files trough TCP connection
+def get_files():
+    # Create a TCP socket
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.bind((Server_IP,49153))
+    # Connect to the Scrap server
+    client_socket.connect((Scrap_IP,49153))  # Utilisez Scrap_IP ici
+    print('Connected to Scrap server and asking for the list.')
+
+    # Sending a signal to the scrap server
+    message = "SIGNGET"
+    client_socket.send(message.encode())
+
+    # Receive data from the Scrap server
+    data = client_socket.recv(1024).decode()
+    print("Received the list of files.")
+
+    # Close the connection
+    client_socket.close()
+    return data
 
 
 def hostname_to_numeric(hostname):
@@ -76,11 +98,14 @@ def receive(server):
                 packet_id, payload = data.split(":", 1)[1].split(";", 1)
                 packet_id = int(packet_id)
                 client_info[addr]['packets_sent'] += 1
-
+                
 
                 if packet_id == last_received_id[addr] + 1:
-                    print(f"Received packet {packet_id} GET from {addr}: {payload}")
+                    print(f"Received SIGNGET {packet_id} from {addr}: {payload}")
                     last_received_id[addr] = packet_id
+                    message = get_files()
+                    server.sendto(f"ACKGET:{packet_id};{message}".encode(), addr)
+
                 else:
                     print(f"Received out of order packet {packet_id} from {addr}: {payload}")
                     client_info[addr]['packets_lost'] += 1
@@ -90,13 +115,13 @@ def receive(server):
                 packet_id, timestamp = data.split(":", 1)[1].split(";", 1)
                 packet_id = int(packet_id)
                 client_info[addr]['packets_sent'] += 1
-                print(f"Received SIGNECHO from {addr}. Sending back the timestamp.")
+                print(f"Received SIGNECHO {packet_id} from {addr}. Sending back the timestamp.")
                 server.sendto(f"ECHOREPLY:{packet_id};{timestamp}".encode(), addr)
 
             elif data.startswith("SIGNSTAT:"):
                 packet_id = int(data.split(":", 1)[1])
                 client_info[addr]['packets_sent'] += 1
-                print(f"Received SIGNSTAT from {addr}. Sending server statistics.")
+                print(f"Received SIGNSTAT {packet_id} from {addr}. Sending server statistics.")
                 stats = server_statistics(addr)
                 server.sendto(f"STATREPLY:{packet_id};{stats}".encode(), addr)
 
@@ -104,9 +129,10 @@ def receive(server):
                 packet_id, payload = data.split(":", 1)[1].split(";", 1)
                 packet_id = int(packet_id)
                 last_received_id[addr] = packet_id
-                print(f"Received SIGNEND from {addr}. Closing connection.")
+                print(f"Received SIGNEND {packet_id} from {addr}. Closing connection.")
                 server.sendto(f"ACKEND:{packet_id}".encode(), addr)
                 remove_client(addr)
+                break
 
         except:
             pass
@@ -118,6 +144,7 @@ def main():
     server.bind((Server_IP, 49152))
 
     receive(server)
+    server.close()
 
 
 if __name__ == "__main__":
