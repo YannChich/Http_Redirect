@@ -17,10 +17,10 @@ from queue import Queue
 
 # DHCP Server.
 
-client_ip = "0.0.0.0"
+client_ip = "127.0.0.6"
 dns_server_ip = "127.0.0.7"
 domain = "example.com"
-resolved_ip = "127.0.0.72"
+resolved_ip = "127.0.0.77"
 connection_open = True
 pause_client = False
 list_queue = Queue()
@@ -123,11 +123,19 @@ def hostname_to_numeric(hostname):
 
 def handle_lost_packet_signal(client, packet_id, sent_packets):
     packet_data = sent_packets.get(packet_id)
-    if packet_data:
-        print("-----------------------------------------------")
-        print(f"Resending packet {packet_id}: {packet_data}")
-        print("-----------------------------------------------")
+    print("-----------------------------------------------")
+    print(f"Resending packet {packet_id}: {packet_data}")
+    print("-----------------------------------------------")
+    if packet_data == "SIGNGET":
         client.sendto(f"SIGNGET:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
+    if packet_data == "SIGNECHO":
+        client.sendto(f"SIGNECHO:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
+    if packet_data == "SIGNSTAT":
+        client.sendto(f"SIGNSTAT:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
+    else:
+        client.sendto(f"SIGNEND:{packet_id};{packet_data}".encode(), (resolved_ip, 49152))
+
+    
 
 def handle_ackget(data):
     global connection_open
@@ -148,7 +156,7 @@ def receive(server, sent_packets):
         print(f"Received data: {data}")
 
         if data.startswith("SIGNACK"):
-            print("Receive ACK from the RUDP Server. Connection established.")
+            print("Receive ACK from the RUDP Server.")
 
         elif data.startswith("SIGNLOST:"):
             print("Receive SIGNLOST , going to send the lost packet")
@@ -205,6 +213,8 @@ def RUDP_Client(hostname):
 
     while True:
         time.sleep(2)
+        if pause_client == True :
+            time.sleep(10)
         if not list_queue.empty():
             file_list = list_queue.get()
             download_file(file_list)
@@ -245,23 +255,23 @@ def RUDP_Client(hostname):
             packet_id += 1
 
             if message == "SIGNGET":
-                print(" [RUDP] Sending a SIGNAL : SIGNGET to the RUDP Server")
+                print(f" [RUDP] Sending a SIGNAL : n°{packet_id} SIGNGET to the RUDP Server")
                 client.sendto(f"SIGNGET:{packet_id};{message}".encode(), (resolved_ip, 49152))
                 sent_packets[packet_id] = message
 
             elif message == "SIGNEND":
-                print(" [RUDP] Sending a SIGNAL : SIGNEND to the RUDP Server")
+                print(f" [RUDP] Sending a SIGNAL : n°{packet_id} SIGNEND to the RUDP Server")
                 client.sendto(f"SIGNEND:{packet_id};{message}".encode(), (resolved_ip, 49152))
                 sent_packets[packet_id] = message
 
             elif message == "SIGNECHO":
                 timestamp = time.time()
-                print(" [RUDP] Sending a SIGNAL : SIGNECHO to the RUDP Server")
+                print(f" [RUDP] Sending a SIGNAL : n°{packet_id} SIGNECHO to the RUDP Server")
                 client.sendto(f"SIGNECHO:{packet_id};{timestamp}".encode(), (resolved_ip, 49152))
                 sent_packets[packet_id] = message
 
             elif message == "SIGNSTAT":
-                print(" [RUDP] Sending a SIGNAL : SIGNSTAT to the RUDP Server")
+                print(f" [RUDP] Sending a SIGNAL : n°{packet_id} SIGNSTAT to the RUDP Server")
                 client.sendto(f"SIGNSTAT:{packet_id}".encode(), (resolved_ip, 49152))
                 sent_packets[packet_id] = message
 
@@ -276,24 +286,24 @@ def RUDP_Client(hostname):
 if __name__ == "__main__":
     hostname = input("Enter your name : ")
     # DHCP Block
-    send_dhcp_dis()
-    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
-    client_ip = dhcp_offer(client_ip, dhcp_packet)
-    dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
-    got_dhcp_ack(client_ip, dhcp_packet)
+    # send_dhcp_dis()
+    # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
+    # client_ip = dhcp_offer(client_ip, dhcp_packet)
+    # dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, timeout=10, iface="enp0s3")[0]
+    # got_dhcp_ack(client_ip, dhcp_packet)
 
-    print("")
+    #print("")
 
     # DNS Block
-    print(f"[DNS] Sending DNS request for the domain: {domain}")
-    dns_response = send_dns_query(dns_server_ip, domain, client_ip)
-    resolved_ip = extract_dns_response_ip(dns_response)
-    if resolved_ip:
-        print(f"[DNS] The domain {domain} has been resolved to {resolved_ip}")
-    else:
-        print(f"[DNS] The domain {domain} could not be resolved.")
+    #print(f"[DNS] Sending DNS request for the domain: {domain}")
+    #dns_response = send_dns_query(dns_server_ip, domain, client_ip)
+    #resolved_ip = extract_dns_response_ip(dns_response)
+    #if resolved_ip:
+    #    print(f"[DNS] The domain {domain} has been resolved to {resolved_ip}")
+    #else:
+    #    print(f"[DNS] The domain {domain} could not be resolved.")
 
-    print("")
+    #print("")
     
     # RUDP Block
     RUDP_Client(hostname)

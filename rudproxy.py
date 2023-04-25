@@ -3,7 +3,7 @@ import time
 
 SizeOfPacket = 1024
 clients = []
-Server_IP = "127.0.0.72"
+Server_IP = "127.0.0.77"
 Scrap_IP = "127.0.0.51"
 last_received_id = {}
 unacked_packets = {}
@@ -90,8 +90,7 @@ def receive(server):
                 clients.append((name, addr, numeric_value))
                 last_received_id[addr] = numeric_value
                 print(f"Client : {data} ")
-                client_info[addr] = {'packets_sent': 0, 'packets_lost': 0, 'connection_time': time.time(),
-                                     'congestion_window': 1, 'congestion_threshold': 64}
+                client_info[addr] = {'packets_sent': 0, 'packets_lost': 0, 'connection_time': time.time()}
                 send_ack(server, addr)
 
             elif data.startswith("SIGNGET:"):
@@ -114,6 +113,7 @@ def receive(server):
             elif data.startswith("SIGNECHO:"):
                 packet_id, timestamp = data.split(":", 1)[1].split(";", 1)
                 packet_id = int(packet_id)
+                last_received_id[addr] = packet_id
                 client_info[addr]['packets_sent'] += 1
                 print(f"Received SIGNECHO {packet_id} from {addr}. Sending back the timestamp.")
                 server.sendto(f"ECHOREPLY:{packet_id};{timestamp}".encode(), addr)
@@ -121,6 +121,7 @@ def receive(server):
             elif data.startswith("SIGNSTAT:"):
                 packet_id = int(data.split(":", 1)[1])
                 client_info[addr]['packets_sent'] += 1
+                last_received_id[addr] = packet_id
                 print(f"Received SIGNSTAT {packet_id} from {addr}. Sending server statistics.")
                 stats = server_statistics(addr)
                 server.sendto(f"STATREPLY:{packet_id};{stats}".encode(), addr)
