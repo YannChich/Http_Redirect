@@ -5,8 +5,8 @@ import requests
 from bs4 import BeautifulSoup
 import socket
 
-Server_IP = "127.0.0.72"
-Scrap_IP = "127.0.0.51"
+Server_IP = "127.0.0.104"
+Scrap_IP = "127.0.0.34"
 
 def send_file_list(file_list):
     # Create TCP socket

@@ -5,12 +5,13 @@ from scapy.layers.inet import UDP, IP
 from scapy.layers.l2 import Ether
 
 
+# Project Vars.
 dhcp_ip = "10.20.30.40"
-ip_range_start = "10.20.30.41"
+ip_range_start = "10.20.30.51"
 ip_range_end = "10.20.30.100"
-ip_allocs = 0
-subnet_mask = "255.255.255.0"
 router_ip = "10.20.30.101"
+subnet_mask = "255.255.255.0"
+ip_allocs = 0
 
 
 
@@ -32,13 +33,13 @@ def generate_ip():
     return None
 
 
-# Define a function to handle DHCP requests
+# DHCP requests handler function.
 def discover_to_offer(packet,offer_client_ip):
 
     if DHCP in packet and packet[DHCP].options[0][1] == 1:
         print("[+] Got DHCP Discover.")
 
-        dhcp_offer = (Ether(src=get_if_hwaddr("enp0s3"), dst=packet[Ether].src) /
+        dhcp_offer = (Ether(src=get_if_hwaddr("ens33"), dst=packet[Ether].src) /
                       IP(src=dhcp_ip, dst="255.255.255.255") /
                       UDP(sport=67, dport=68) /
                       BOOTP(op=2, yiaddr=offer_client_ip, siaddr="10.20.30.40", chaddr=packet[Ether].src)/
@@ -61,7 +62,7 @@ def request_to_ack(packet,offer_client_ip):
     if DHCP in packet and packet[DHCP].options[0][1] == 3:
         print("[+] Got DHCP Request.")
 
-        dhcp_ack = (Ether(src=get_if_hwaddr("enp0s3"), dst=packet[Ether].src) /
+        dhcp_ack = (Ether(src=get_if_hwaddr("ens33"), dst=packet[Ether].src) /
                     IP(src=dhcp_ip, dst="255.255.255.255") /
                     UDP(sport=67, dport=68) /
                     BOOTP(op=2, yiaddr=packet[BOOTP].yiaddr, siaddr="10.20.30.40", chaddr=packet[Ether].src) /
@@ -83,7 +84,7 @@ def request_to_ack(packet,offer_client_ip):
 if __name__ == "__main__":
         while True:
             print("[+] DHCP Server Running.")
-            dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, iface="enp0s3")[0]
+            dhcp_packet = sniff(filter="udp and (port 67 or port 68)", count=1, iface="ens33")[0]
             offer_client_ip = discover_to_offer(dhcp_packet,generate_ip())
-            packet = sniff(filter="udp and port 67", count=1, iface="enp0s3")[0]
+            packet = sniff(filter="udp and port 67", count=1, iface="ens33")[0]
             request_to_ack(packet,offer_client_ip)
