@@ -139,7 +139,10 @@ def receive(server):
                     packet_id = int(packet_id)
                     last_received_id[addr] = packet_id
                     print(f"Received SIGNEND {packet_id} from {addr}. Closing connection.")
-                    send_ack(server, addr, packet_id)
+                    server.sendto("ACKEND".encode(), addr)
+                    client_info[addr]['congestion_window'] -= 1
+                    if addr in unacked_packets and packet_id in unacked_packets[addr]:
+                        del unacked_packets[addr][packet_id]
                     remove_client(addr)
                     break
 
