@@ -83,6 +83,9 @@ def receive(server):
                 print(f"Client : {data} ")
                 client_info[addr] = {'packets_sent': 0, 'packets_lost': 0, 'connection_time': time.time(),
                                      'congestion_window': 1}
+                if addr not in unacked_packets:
+                    unacked_packets[addr] = {}
+                    unacked_packets[addr][packet_id] = (time.time(), data)
                 send_ack(server, addr, numeric_value)
 
             elif addr in client_info:
@@ -102,6 +105,9 @@ def receive(server):
                         last_received_id[addr] = packet_id
                         message = get_files()
                         time.sleep(0.5)
+                        if addr not in unacked_packets:
+                            unacked_packets[addr] = {}
+                            unacked_packets[addr][packet_id] = (time.time(), data)
                         if addr in unacked_packets and packet_id in unacked_packets[addr]:
                             del unacked_packets[addr][packet_id]
                         client_info[addr]['congestion_window'] -= 1
@@ -118,6 +124,9 @@ def receive(server):
                     last_received_id[addr] = packet_id
                     client_info[addr]['packets_sent'] += 1
                     print(f"Received SIGNECHO {packet_id} from {addr}. Sending back the timestamp.")
+                    if addr not in unacked_packets:
+                        unacked_packets[addr] = {}
+                        unacked_packets[addr][packet_id] = (time.time(), data)
                     if addr in unacked_packets and packet_id in unacked_packets[addr]:
                         del unacked_packets[addr][packet_id]
                     client_info[addr]['congestion_window'] -= 1
@@ -129,6 +138,9 @@ def receive(server):
                     last_received_id[addr] = packet_id
                     print(f"Received SIGNSTAT {packet_id} from {addr}. Sending server statistics.")
                     stats = server_statistics(addr)
+                    if addr not in unacked_packets:
+                        unacked_packets[addr] = {}
+                        unacked_packets[addr][packet_id] = (time.time(), data)
                     if addr in unacked_packets and packet_id in unacked_packets[addr]:
                         del unacked_packets[addr][packet_id]
                     client_info[addr]['congestion_window'] -= 1
@@ -140,9 +152,12 @@ def receive(server):
                     last_received_id[addr] = packet_id
                     print(f"Received SIGNEND {packet_id} from {addr}. Closing connection.")
                     server.sendto("ACKEND".encode(), addr)
-                    client_info[addr]['congestion_window'] -= 1
+                    if addr not in unacked_packets:
+                        unacked_packets[addr] = {}
+                        unacked_packets[addr][packet_id] = (time.time(), data)
                     if addr in unacked_packets and packet_id in unacked_packets[addr]:
                         del unacked_packets[addr][packet_id]
+                    client_info[addr]['congestion_window'] -= 1
                     remove_client(addr)
                     break
 
