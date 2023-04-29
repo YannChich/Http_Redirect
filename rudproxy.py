@@ -3,8 +3,8 @@ import time
 
 SizeOfPacket = 1024
 clients = []
-Server_IP = "127.0.0.104"
-Scrap_IP = "127.0.0.34"
+Server_IP = "127.0.0.10"
+Scrap_IP = "127.0.0.6"
 max_window = 64
 last_received_id = {}
 unacked_packets = {}
@@ -83,9 +83,6 @@ def receive(server):
                 print(f"Client : {data} ")
                 client_info[addr] = {'packets_sent': 0, 'packets_lost': 0, 'connection_time': time.time(),
                                      'congestion_window': 1}
-                if addr not in unacked_packets:
-                    unacked_packets[addr] = {}
-                    unacked_packets[addr][packet_id] = (time.time(), data)
                 send_ack(server, addr, numeric_value)
 
             elif addr in client_info:
@@ -99,15 +96,11 @@ def receive(server):
                     packet_id, payload = data.split(":", 1)[1].split(";", 1)
                     packet_id = int(packet_id)
                     client_info[addr]['packets_sent'] += 1
-
                     if packet_id == last_received_id[addr] + 1:
                         print(f"Received SIGNGET {packet_id} from {addr}: {payload}")
                         last_received_id[addr] = packet_id
                         message = get_files()
                         time.sleep(0.5)
-                        if addr not in unacked_packets:
-                            unacked_packets[addr] = {}
-                            unacked_packets[addr][packet_id] = (time.time(), data)
                         if addr in unacked_packets and packet_id in unacked_packets[addr]:
                             del unacked_packets[addr][packet_id]
                         client_info[addr]['congestion_window'] -= 1
@@ -121,45 +114,48 @@ def receive(server):
                 elif data.startswith("SIGNECHO:"):
                     packet_id, timestamp = data.split(":", 1)[1].split(";", 1)
                     packet_id = int(packet_id)
-                    last_received_id[addr] = packet_id
                     client_info[addr]['packets_sent'] += 1
-                    print(f"Received SIGNECHO {packet_id} from {addr}. Sending back the timestamp.")
-                    if addr not in unacked_packets:
-                        unacked_packets[addr] = {}
-                        unacked_packets[addr][packet_id] = (time.time(), data)
-                    if addr in unacked_packets and packet_id in unacked_packets[addr]:
-                        del unacked_packets[addr][packet_id]
-                    client_info[addr]['congestion_window'] -= 1
-                    server.sendto(f"ECHOREPLY:{packet_id};{timestamp}".encode(), addr)
+                    if packet_id == last_received_id[addr] + 1:
+                        print(f"Received SIGNECHO {packet_id} from {addr}. Sending back the timestamp.")
+                        last_received_id[addr] = packet_id
+                        if addr in unacked_packets and packet_id in unacked_packets[addr]:
+                            del unacked_packets[addr][packet_id]
+                        client_info[addr]['congestion_window'] -= 1
+                        server.sendto(f"ECHOREPLY:{packet_id};{timestamp}".encode(), addr)
+                    else:
+                        print(f"Received out of order packet {packet_id} from {addr}")
+                        client_info[addr]['packets_lost'] += 1
+                        send_lost_packet_signal(server, addr, last_received_id[addr] + 1)
 
                 elif data.startswith("SIGNSTAT:"):
                     packet_id = int(data.split(":", 1)[1])
                     client_info[addr]['packets_sent'] += 1
-                    last_received_id[addr] = packet_id
-                    print(f"Received SIGNSTAT {packet_id} from {addr}. Sending server statistics.")
-                    stats = server_statistics(addr)
-                    if addr not in unacked_packets:
-                        unacked_packets[addr] = {}
-                        unacked_packets[addr][packet_id] = (time.time(), data)
-                    if addr in unacked_packets and packet_id in unacked_packets[addr]:
-                        del unacked_packets[addr][packet_id]
-                    client_info[addr]['congestion_window'] -= 1
-                    server.sendto(f"STATREPLY:{packet_id};{stats}".encode(), addr)
+                    if packet_id == last_received_id[addr] + 1:
+                        print(f"Received SIGNSTAT {packet_id} from {addr}. Sending server statistics.")
+                        last_received_id[addr] = packet_id
+                        stats = server_statistics(addr)
+                        if addr in unacked_packets and packet_id in unacked_packets[addr]:
+                            del unacked_packets[addr][packet_id]
+                        client_info[addr]['congestion_window'] -= 1
+                        server.sendto(f"STATREPLY:{packet_id};{stats}".encode(), addr)
+                    else:
+                        print(f"Received out of order packet {packet_id} from {addr}")
+                        client_info[addr]['packets_lost'] += 1
+                        send_lost_packet_signal(server, addr, last_received_id[addr] + 1)
 
                 elif data.startswith("SIGNEND:"):
                     packet_id, payload = data.split(":", 1)[1].split(";", 1)
                     packet_id = int(packet_id)
-                    last_received_id[addr] = packet_id
-                    print(f"Received SIGNEND {packet_id} from {addr}. Closing connection.")
-                    server.sendto("ACKEND".encode(), addr)
-                    if addr not in unacked_packets:
-                        unacked_packets[addr] = {}
-                        unacked_packets[addr][packet_id] = (time.time(), data)
-                    if addr in unacked_packets and packet_id in unacked_packets[addr]:
-                        del unacked_packets[addr][packet_id]
-                    client_info[addr]['congestion_window'] -= 1
-                    remove_client(addr)
-                    break
+                    if packet_id == last_received_id[addr] + 1:
+                        print(f"Received SIGNEND {packet_id} from {addr}. Closing connection.")
+                        last_received_id[addr] = packet_id
+                        send_ack(server, addr, packet_id)
+                        remove_client(addr)
+                        break
+                    else:
+                        print(f"Received out of order packet {packet_id} from {addr}")
+                        client_info[addr]['packets_lost'] += 1
+                        send_lost_packet_signal(server, addr, last_received_id[addr] + 1)
 
         except:
             pass
