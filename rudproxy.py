@@ -4,7 +4,7 @@ import time
 SizeOfPacket = 1024
 clients = []
 Server_IP = "127.0.0.10"
-Scrap_IP = "127.0.0.6"
+Scrap_IP = "127.0.0.5"
 max_window = 64
 last_received_id = {}
 unacked_packets = {}
