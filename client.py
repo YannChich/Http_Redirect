@@ -18,7 +18,7 @@ from queue import Queue
 # DHCP Server.
 
 client_ip = "0.0.0.0"
-dns_server_ip = "127.0.0.9"
+dns_server_ip = "127.0.0.5"
 domain = "example.com"
 resolved_ip = "0.0.0.0"
 connection_open = True
