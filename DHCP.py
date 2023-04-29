@@ -7,7 +7,7 @@ from scapy.layers.l2 import Ether
 
 # Project Vars.
 dhcp_ip = "10.20.30.40"
-ip_range_start = "10.20.30.51"
+ip_range_start = "10.20.30.41"
 ip_range_end = "10.20.30.100"
 router_ip = "10.20.30.101"
 subnet_mask = "255.255.255.0"
