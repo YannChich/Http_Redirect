@@ -1,8 +1,8 @@
 import socket
 
 port = 53
-ip = "127.0.0.9"
-fixed_ip = "127.0.0.104"
+ip = "127.0.0.1"
+fixed_ip = "127.0.0.10"
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((ip, port))
